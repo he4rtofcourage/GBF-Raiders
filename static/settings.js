@@ -328,6 +328,7 @@ function SetupControls() {
 			localStorage.setItem( "savedSettings", JSON.stringify( settings ) );
 			if ( document.getElementById( "viramate-api" ) !== null ) {
 				document.getElementById( "viramate-api" ).src = "chrome-extension://" + settings.viramateID + "/content/api.html";
+				document.getElementById( "viramate-api" ).contentWindow.console.log = function () {};
 			}
 		} );
 		document.getElementById( "sound-volume-slider" ).addEventListener( "input", function ( event ) {
@@ -570,12 +571,11 @@ function SetupControls() {
 					console.log( "Adding selected raid..." );
 					try {
 						AddSelectedRaid( result.room );
+						document.getElementById( "search-input" ).value = "";
 					} catch ( error ) {
 						console.log( "Error adding raid to selected raids: " + error );
 					}
-					setTimeout( function () {
-						document.getElementById( "searcher" ).value = "";
-					}, 50 );
+					return false;
 				},
 				showNoResults: true
 			} );

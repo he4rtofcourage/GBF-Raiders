@@ -27,6 +27,19 @@
 		}
 	</script>
 	<link href="https://fonts.googleapis.com/css?family=Open+Sans" rel="stylesheet">
+	<!-- Global site tag (gtag.js) - Google Analytics -->
+	<script async src="https://www.googletagmanager.com/gtag/js?id=UA-48921108-3"></script>
+	<script>
+		window.dataLayer = window.dataLayer || [];
+
+		function gtag() {
+			dataLayer.push(arguments);
+		}
+		gtag('js', new Date());
+
+		gtag('config', 'UA-48921108-3');
+	</script>
+
 	<link rel="stylesheet" type="text/css" href="semantic/dist/semantic.min.css">
 	<link rel="stylesheet" type="text/css" href="darken.css">
 	<link rel="stylesheet" type="text/css" href="sliders.css">
@@ -157,7 +170,7 @@
 				<input id="viramate-id-input" type="text" value="fgpokpknehglcioijejfeebigdnbnokj">
 			</div>
 			<button id="view-statistics" class="ui bigger button right labeled icon">View Current Stats<i class="question circle icon"></i></button>
-			<button id="full-screen" class="primary ui button right labeled icon">Full Screen<i class="right expand icon"></i></button>
+			<button id="full-screen" class="ui bigger button right labeled icon">Full Screen<i class="right expand icon"></i></button>
 			<span class="input-control">
 				<div id="join-disable" class="ui checkbox">
 					<label>Disable Already Joined Raids</label>
@@ -254,7 +267,7 @@
 					</div>
 					<span class="ui search">
 						<div class="ui icon input">
-							<input id="searcher" role="search" aria-label="Search" class="prompt" type="text" placeholder="Search for raids...">
+							<input id="search-input" role="search" aria-label="Search" class="prompt" type="text" placeholder="Search for raids...">
 							<i class="search icon"></i>
 						</div>
 						<div class="results"></div>
@@ -265,10 +278,9 @@
 		<div id="news-message" class="ui message">
 			<i class="close icon"></i>
 			<div class="header">
-				News - 3/05/2018
+				News - 3/06/2018
 			</div>
-			<p>A lot of updates, please let me know if anything gets messed up. I moved the Full Screen button to the Misc Settings tab and the strike time reminder only appears if you actually set the strike time in the settings. I added a filter to the raid search.
-				I tried to make a bit more space on the screen so please forgive if something looks wonky.</p>
+			<p>I added a thing where is someone tries a raid and its full or over, then its going to reflect on everyone's screen hopefully so that you can tell if its full/over before you click on it. PLEASE be patient with me if this gets weird.</p>
 		</div>
 	</div>
 	<script type="text/javascript">
@@ -280,6 +292,7 @@
 				return response;
 			}).then(function() {
 				document.getElementById('container').innerHTML += '<iframe id="viramate-api" src="chrome-extension://fgpokpknehglcioijejfeebigdnbnokj/content/api.html" width="1" height="1"><p>Your browser does not support iframes.</p></iframe>';
+				document.getElementById("viramate-api").contentWindow.console.log = function() {};
 			}).catch(function(err) {
 				console.log("Error finding Viramate extension on page load. " + err);
 			});
