@@ -41,17 +41,14 @@ let twitterBackupOptions = {
 	token_secret: process.env.backup_access_token_secret || ""
 };
 let usingTwitterBackup = false;
-
-function TimedLogger( area, type, data ) {
-	let csvString = moment().format( 'MM/DD/YYYY,HH:mm:ss' ) + "," + area + "," + type + "," + data;
-	console.log( csvString );
-}
+let twitterClient = null;
+let errors = [];
 
 let raidConfigs = require( './raids.json' );
 
 app.set( 'json spaces', 0 );
 app.use( helmet() );
-app.use( morgan( 'combined' ) );
+//app.use( morgan( 'combined' ) );
 app.use( compression() );
 app.use( bodyParser.json() );
 app.use( bodyParser.urlencoded( {
@@ -69,6 +66,41 @@ app.get( '/getraids', function ( req, res ) {
 app.get( '/serviceWorker.js', function ( req, res ) {
 	res.header( 'Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate' );
 	res.sendFile( __dirname + '/static/serviceWorker.js' );
+} );
+
+app.get( '/errorlogs', function ( req, res ) {
+	res.header( 'Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate' );
+	res.header( 'Access-Control-Allow-Origin', '*' );
+	let htmlString = '<html lang="en"><head><meta charset="UTF-8"><title>GBF Raiders Errors</title><style>';
+	htmlString += `
+	body {
+		padding: 50px;
+	}
+	caption {
+		font-size: 26px;
+		font-weight: bold;
+		text-decoration: underline;
+	}
+	table {
+		width: 100%;
+		border: 2px solid black;
+	}
+	td {
+		padding: 10px;
+		border: 1px solid black;
+	}
+	th {
+		padding: 10px;
+		border: 2px solid black;
+	}`;
+	htmlString += '</style></head><body><table><caption>Most recent errors since up</caption><thead><tr><th scope="col">Date</th><th scope="col">Time</th><th scope="col">Message</th><th scope="col">Data</th></tr></thead><tbody>';
+	errors.reverse();
+	errors.forEach( function ( error ) {
+		htmlString += `<tr><td>${error.date}</td><td>${error.time}</td><td>${error.message}</td><td>${JSON.stringify(error.data)}</td></tr>`;
+	} );
+	htmlString += '</tbody></table></body></html>';
+	errors.reverse();
+	res.status( 200 ).type( 'html' ).send( new Buffer( htmlString ) );
 } );
 
 app.get( '/', function ( req, res ) {
@@ -152,7 +184,7 @@ function GetRaidID( data ) {
 	try {
 		result = data.text.substr( data.text.indexOf( ":" ) - 9, 8 );
 	} catch ( error ) {
-		TimedLogger( "Twitter", "Error", error );
+		console.log( error )
 	}
 	return result;
 }
@@ -160,18 +192,17 @@ function GetRaidID( data ) {
 function IsValidTweet( data ) {
 	let result = false;
 	if ( data.source !== '<a href="http://granbluefantasy.jp/" rel="nofollow">グランブルー ファンタジー</a>' ) {
-		TimedLogger( "Twitter", "Invalid Tweet Source", data.source );
+		console.log( "Invalid Tweet Source", data.source );
 	} else {
 		if ( searchTextForRaids( data.text ) === null ) {
-			TimedLogger( "Twitter", "No Raid Name", data.text );
+			console.log( "No Raid Name", data.text );
 		} else {
 			if ( DoesTweetContainMessage( data ) && searchTextForRaids( GetTweetMessage( data ).message ) !== null ) {
-				TimedLogger( "Twitter", "Message Contains Name", data.text );
+				console.log( "Message Contains Name", data.text );
 			} else {
 				if ( GetRaidID( data ) === null ) {
-					TimedLogger( "Twitter", "No Raid ID", data.text );
+					console.log( "No Raid ID", data.text );
 				} else {
-					TimedLogger( "Twitter", "Valid Tweet", "" );
 					result = true;
 				}
 			}
@@ -181,12 +212,10 @@ function IsValidTweet( data ) {
 }
 
 function StartTwitterStream( options ) {
-	TimedLogger( "System", "Starting Twitter Stream", "" );
+	console.log( "Starting Twitter Stream" );
 	try {
-		let client = new twitter( options );
-
-		client.on( 'tweet', function ( tweet ) {
-			TimedLogger( "Twitter", "Tweet Found", "" );
+		twitterClient = new twitter( options );
+		twitterClient.on( 'tweet', function ( tweet ) {
 			if ( IsValidTweet( tweet ) ) {
 				let raidInfo = {
 					id: GetRaidID( tweet ),
@@ -195,7 +224,8 @@ function StartTwitterStream( options ) {
 					room: searchTextForRaids( tweet.text ),
 					message: "No Twitter Message.",
 					language: "JP",
-					status: "unclicked"
+					status: "unclicked",
+					timer: 0
 				};
 				if ( DoesTweetContainMessage( tweet ) ) {
 					let tweetMessage = GetTweetMessage( tweet );
@@ -204,36 +234,43 @@ function StartTwitterStream( options ) {
 				} else if ( GetTweetLanguage( tweet ) !== null ) {
 					raidInfo.language = GetTweetLanguage( tweet );
 				}
-				TimedLogger( "Twitter", "Raid Info", JSON.stringify( raidInfo ) );
 				lastTweet = new Date().getTime();
 				io.to( raidInfo.room ).emit( 'tweet', raidInfo );
 			}
 		} );
 
-		client.on( 'error', function ( error ) {
-			TimedLogger( "Twitter", "Error", JSON.stringify( error ) );
+		twitterClient.on( 'error', function ( error ) {
+			errors.push( { date: new Date().toDateString(), time: new Date().toTimeString(), message: "Twitter Client Error", data: error } );
+			console.log( "Twitter Client Error", error );
+			twitterClient.abort();
 		} );
 
-		client.on( 'reconnect', function ( reconnect ) {
-			TimedLogger( "Twitter", "Reconnect", JSON.stringify( reconnect ) );
+		twitterClient.on( 'reconnect', function ( reconnect ) {
+			errors.push( { date: new Date().toDateString(), time: new Date().toTimeString(), message: "Twitter Client Reconnect", data: reconnect } );
+			console.log( "Twitter Client Reconnect", reconnect );
+			twitterClient.reconnect();
 		} );
 
-		client.track( keywords );
+		twitterClient.track( keywords );
 	} catch ( error ) {
-		TimedLogger( "Twitter", "Error", JSON.stringify( error ) );
+		errors.push( { date: new Date().toDateString(), time: new Date().toTimeString(), message: "Twitter Client Creation Error", data: error } );
+		console.log( "Twitter Client Error", error );
+		twitterClient.abort();
 	}
 }
 
 setInterval( function () {
 	if ( new Date().getTime() - 600000 > lastTweet ) {
-		TimedLogger( "Twitter", "No Tweet Warning", "Sending Email..." );
+		errors.push( { date: new Date().toDateString(), time: new Date().toTimeString(), message: "No Tweets", data: {} } );
+		console.log( "No tweets in 10 mins..." );
 		io.emit( 'warning', { type: "twitter" } );
 		try {
 			exec( 'echo "There hasn\'t been a tweet in 10 minutes! You should check up on things." | mail -s "Tweet Warning!" gene@pinskiy.us' );
 			lastTweet = new Date().getTime();
 			setTimeout( function () {
-				TimedLogger( "Twitter", "No Tweet Warning", "Restarting Twitter Client..." );
-				if ( usingTwitterBackup ) {
+				console.log( "Restarting Twitter Client..." );
+				twitterClient.abort();
+				if ( !usingTwitterBackup ) {
 					if ( twitterBackupOptions.consumer_key != "" ) {
 						StartTwitterStream( twitterBackupOptions );
 					}
@@ -243,16 +280,15 @@ setInterval( function () {
 				usingTwitterBackup = !usingTwitterBackup;
 			}, 500 );
 		} catch ( error ) {
-			TimedLogger( "Twitter", "No Tweet Error", JSON.stringify( error ) );
+			errors.push( { date: new Date().toDateString(), time: new Date().toTimeString(), message: "Twitter Client Restart Error", data: error } );
+			console.log( "Twitter Client Restart Error", error );
 		}
 	}
 }, 60000 )
 
 io.sockets.on( 'connection', function ( socket ) {
-	TimedLogger( "Socket", "New Connection", "" );
 	socket.on( 'subscribe',
 		function ( data ) {
-			TimedLogger( "Socket", "Room Subscribed", data.room );
 			socket.join( data.room );
 		} );
 	socket.on( 'raid-over',
@@ -261,10 +297,9 @@ io.sockets.on( 'connection', function ( socket ) {
 		} );
 	socket.on( 'unsubscribe',
 		function ( data ) {
-			TimedLogger( "Socket", "Room Unsubscribed", data.room );
 			socket.leave( data.room );
 		} );
 } );
 
-TimedLogger( "System", "Starting GBF Raiders", "Port " + port );
+console.log( "Starting GBF Raiders on Port " + port );
 StartTwitterStream( twitterOptions );
