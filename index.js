@@ -1,6 +1,8 @@
 const express = require( 'express' );
 const twitter = require( 'node-tweet-stream' );
 const { exec } = require( 'child_process' );
+const http2 = require( 'http2' );
+const https = require( 'https' );
 const st = require( 'st' );
 let fs = require( 'fs' );
 let app = express();
@@ -9,6 +11,47 @@ const bodyParser = require( 'body-parser' );
 const compression = require( 'compression' );
 const morgan = require( 'morgan' );
 const moment = require( 'moment' );
+
+const Probe = require( 'pmx' ).probe();
+var openSockets = Probe.metric( {
+	name: 'Open Sockets',
+	value: function () {
+		return Object.keys( io.sockets.sockets ).length;
+	}
+} );
+
+function GetTopRoom() {
+	try {
+		let raidRooms = Object.entries( io.sockets.adapter.rooms ).filter( roomSet => roomSet[ 0 ].startsWith( "lvl" ) );
+		if ( raidRooms.length > 0 ) {
+			raidRooms.sort( function ( a, b ) {
+				return b[ 1 ].length - a[ 1 ].length;
+			} );
+			return raidRooms[ 0 ][ 0 ] + ": " + raidRooms[ 0 ][ 1 ].length;
+		}
+	} catch ( err ) {
+		console.log( "Error getting top room: " + err );
+	}
+}
+
+var topRoom = Probe.metric( {
+	name: 'Top Room',
+} );
+
+setInterval( function () {
+	try {
+		topRoom.set( GetTopRoom() );
+	} catch ( err ) {
+		console.log( "Error setting top room: " + err );
+	}
+}, 60000 )
+
+var tweetsPerMin = Probe.meter( {
+	name: 'tweets/min',
+	samples: 1,
+	timeframe: 60
+} );
+
 const port = process.env.PORT || 80;
 let io = null;
 let lastTweet = new Date().getTime();
@@ -20,7 +63,7 @@ if ( process.env.sslEnabled === "true" ) {
 		cert: fs.readFileSync( __dirname + '/sslcert/fullchain.pem' ),
 		key: fs.readFileSync( __dirname + '/sslcert/privkey.pem' )
 	};
-	let sslServer = require( 'https' ).createServer( options, app );
+	let sslServer = https.createServer( options, app );
 	sslServer.listen( 443 );
 	io = require( 'socket.io' ).listen( sslServer );
 } else {
@@ -192,16 +235,16 @@ function GetRaidID( data ) {
 function IsValidTweet( data ) {
 	let result = false;
 	if ( data.source !== '<a href="http://granbluefantasy.jp/" rel="nofollow">グランブルー ファンタジー</a>' ) {
-		console.log( "Invalid Tweet Source", data.source );
+		//console.log( "Invalid Tweet Source", data.source );
 	} else {
 		if ( searchTextForRaids( data.text ) === null ) {
-			console.log( "No Raid Name", data.text );
+			//console.log( "No Raid Name", data.text );
 		} else {
 			if ( DoesTweetContainMessage( data ) && searchTextForRaids( GetTweetMessage( data ).message ) !== null ) {
-				console.log( "Message Contains Name", data.text );
+				//console.log( "Message Contains Name", data.text );
 			} else {
 				if ( GetRaidID( data ) === null ) {
-					console.log( "No Raid ID", data.text );
+					//console.log( "No Raid ID", data.text );
 				} else {
 					result = true;
 				}
@@ -212,7 +255,6 @@ function IsValidTweet( data ) {
 }
 
 function StartTwitterStream( options ) {
-	console.log( "Starting Twitter Stream" );
 	try {
 		twitterClient = new twitter( options );
 		twitterClient.on( 'tweet', function ( tweet ) {
@@ -236,25 +278,26 @@ function StartTwitterStream( options ) {
 				}
 				lastTweet = new Date().getTime();
 				io.to( raidInfo.room ).emit( 'tweet', raidInfo );
+				tweetsPerMin.mark();
 			}
 		} );
 
 		twitterClient.on( 'error', function ( error ) {
 			errors.push( { date: new Date().toDateString(), time: new Date().toTimeString(), message: "Twitter Client Error", data: error } );
-			console.log( "Twitter Client Error", error );
+			console.log( "Twitter Client Error", JSON.stringify( error ) );
 			twitterClient.abort();
 		} );
 
 		twitterClient.on( 'reconnect', function ( reconnect ) {
 			errors.push( { date: new Date().toDateString(), time: new Date().toTimeString(), message: "Twitter Client Reconnect", data: reconnect } );
-			console.log( "Twitter Client Reconnect", reconnect );
+			console.log( "Twitter Client Reconnect", JSON.stringify( reconnect ) );
 			twitterClient.reconnect();
 		} );
 
 		twitterClient.track( keywords );
 	} catch ( error ) {
 		errors.push( { date: new Date().toDateString(), time: new Date().toTimeString(), message: "Twitter Client Creation Error", data: error } );
-		console.log( "Twitter Client Error", error );
+		console.log( "Twitter Client Error", JSON.stringify( error ) );
 		twitterClient.abort();
 	}
 }
@@ -301,5 +344,4 @@ io.sockets.on( 'connection', function ( socket ) {
 		} );
 } );
 
-console.log( "Starting GBF Raiders on Port " + port );
 StartTwitterStream( twitterOptions );
